@@ -1,0 +1,19 @@
+{"format_version": "1.0", "layers": [
+ {"name": "F.Mask", "type": "Top Solder Mask", "color": "Black", "thickness": 0.02, "material": null, "epsilon": null, "lossTangent": null, "user-name": "F_Mask"},
+ {"name": "F.Cu", "type": "copper", "color": null, "thickness": 0.035, "material": null, "epsilon": null, "lossTangent": null, "user-name": "F_Cu"},
+ {"name": "dielectric 1", "type": "prepreg", "color": null, "thickness": 0.0764, "material": "1080", "epsilon": 3.91, "lossTangent": 0.02, "user-name": "dielectric 1"},
+ {"name": "In1.Cu", "type": "copper", "color": null, "thickness": 0.0152, "material": null, "epsilon": null, "lossTangent": null, "user-name": "In1_Cu"},
+ {"name": "dielectric 2", "type": "core", "color": null, "thickness": 0.1, "material": "core", "epsilon": 4.4, "lossTangent": 0.02, "user-name": "dielectric 2"},
+ {"name": "In2.Cu", "type": "copper", "color": null, "thickness": 0.0152, "material": null, "epsilon": null, "lossTangent": null, "user-name": "In2_Cu"},
+ {"name": "dielectric 3", "type": "prepreg", "color": null, "thickness": 0.2868, "material": "7628+1080", "epsilon": 4.3, "lossTangent": 0.02, "user-name": "dielectric 3"},
+ {"name": "In3.Cu", "type": "copper", "color": null, "thickness": 0.0152, "material": null, "epsilon": null, "lossTangent": null, "user-name": "In3_Cu"},
+ {"name": "dielectric 4", "type": "core", "color": null, "thickness": 0.1, "material": "core", "epsilon": 4.4, "lossTangent": 0.02, "user-name": "dielectric 4"},
+ {"name": "In4.Cu", "type": "copper", "color": null, "thickness": 0.0152, "material": null, "epsilon": null, "lossTangent": null, "user-name": "In4_Cu"},
+ {"name": "dielectric 5", "type": "prepreg", "color": null, "thickness": 0.2868, "material": "1080+7628", "epsilon": 4.3, "lossTangent": 0.02, "user-name": "dielectric 5"},
+ {"name": "In5.Cu", "type": "copper", "color": null, "thickness": 0.0152, "material": null, "epsilon": null, "lossTangent": null, "user-name": "In5_Cu"},
+ {"name": "dielectric 6", "type": "core", "color": null, "thickness": 0.1, "material": "core", "epsilon": 4.4, "lossTangent": 0.02, "user-name": "dielectric 6"},
+ {"name": "In6.Cu", "type": "copper", "color": null, "thickness": 0.0152, "material": null, "epsilon": null, "lossTangent": null, "user-name": "In6_Cu"},
+ {"name": "dielectric 7", "type": "prepreg", "color": null, "thickness": 0.0764, "material": "1080", "epsilon": 3.91, "lossTangent": 0.02, "user-name": "dielectric 7"},
+ {"name": "B.Cu", "type": "copper", "color": null, "thickness": 0.035, "material": null, "epsilon": null, "lossTangent": null, "user-name": "B_Cu"},
+ {"name": "B.Mask", "type": "Bottom Solder Mask", "color": "Black", "thickness": 0.02, "material": null, "epsilon": null, "lossTangent": null, "user-name": "B_Mask"}
+]}
