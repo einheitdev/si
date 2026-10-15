@@ -294,8 +294,7 @@ def configure(slice_dir, nets, ports, z_se, z_diff, f_stop, mesh_um):
   cfg["via"] = {"plating_thickness": 50, "filling_epsilon": 0}
   for port, p in zip(cfg["ports"], ports):
     port["impedance"] = z_se
-    port["layer"] = fix_ports.LAYER_INDEX[p["layer"]]
-    port["plane"] = 1 if port["layer"] <= 3 else 6
+    port["layer"], port["plane"] = fix_ports.layer_plane(p["layer"])
     port["width"] = int(round(p["w"] * 1000))
     port["length"] = int(round(p["length"] * 1000))
   interface = {"max_frequency": 4.266e9, "se_impedance_nominal": z_se,
@@ -630,6 +629,8 @@ def main(argv=None):
   if args.z_cal:
     Z_CAL["se"], Z_CAL["diff"] = (float(x) for x in args.z_cal.split(","))
   fix_ports.STITCH = not args.no_stitch
+  fix_ports.COPPER_LAYERS = board.copper_layers()
+  fix_ports.PORT_PLANE = dict(board.port_plane)
   fix_ports.RETURN_VIA = args.return_via
   fix_ports.ZONE_CLEARANCE = args.zone_clearance
   if not args.se and not args.pair:

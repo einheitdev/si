@@ -38,6 +38,22 @@ import sys
 
 LAYER_INDEX = {"F.Cu": 0, "In1.Cu": 1, "In2.Cu": 2, "In3.Cu": 3, "In4.Cu": 4,
                "In5.Cu": 5, "In6.Cu": 6, "B.Cu": 7}
+# copper layers of the board top to bottom (gerber2ems metal index order)
+# and the plane a port on a layer is referenced to; run_si sets both from
+# board.json so a 4-layer board gets B.Cu = 3 and its own plane instead of
+# the 8-layer rule (L2 for L1-L4, L7 for L5-L8)
+COPPER_LAYERS = list(LAYER_INDEX)
+PORT_PLANE = {}
+
+
+def layer_plane(layer):
+  """(metal index of `layer`, metal index of the plane its port uses)."""
+  idx = COPPER_LAYERS.index(layer)
+  if layer in PORT_PLANE:
+    return idx, COPPER_LAYERS.index(PORT_PLANE[layer])
+  return idx, (1 if idx <= 3 else 6)
+
+
 # a port needs a straight uniform run under it: shorter straight pieces at a
 # trace end are cut off and the port moves inward (mm)
 MIN_PORT_SEG = 0.8
@@ -698,8 +714,8 @@ def fix_slice(pcb, nets, refill=True):
                          "(seen: DDR_DQS1_B legs 0.02 mm apart in the "
                          "meander)")
   for pc, p in zip(cfg["ports"], order):
-    layer = LAYER_INDEX[p["layer"]]
-    pc.update(layer=layer, plane=1 if layer <= 3 else 6,
+    layer, plane = layer_plane(p["layer"])
+    pc.update(layer=layer, plane=plane,
               width=int(round(p["w"] * 1000)),
               length=int(round(p["length"] * 1000)))
   json.dump(cfg, open(sim_path, "w"), indent=2)
