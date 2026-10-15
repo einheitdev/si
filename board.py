@@ -38,6 +38,13 @@ class Board:
     self.stackup_path = self.dir / cfg.get("stackup", "stackup.json")
     self.stackup = json.load(open(self.stackup_path))["layers"]
     self.planes = cfg.get("planes", [])
+    # layer -> plane the simulation ports on that layer are referenced to
+    # (optional; without it fix_ports uses its 8-layer L2/L7 rule)
+    self.port_plane = cfg.get("port_plane", {})
+    # netclass -> {"f_start", "f_stop", "rows_mhz", "nyquist_mhz"}: the
+    # simulated band and report table per class (optional; see
+    # run_si.REPORT_DEFAULT for the LPDDR4X defaults)
+    self.report = cfg.get("report", {})
     # netclass -> (single-ended Z, differential Z or None)
     self.netclass_z = {k: (v[0], v[1]) for k, v in cfg["netclass_z"].items()}
     self.z_cal = dict(cfg.get("z_cal", {"se": 1.0, "diff": 1.0}))

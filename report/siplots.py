@@ -28,7 +28,9 @@ matplotlib.use("Agg")
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#4a3aa7"]
 INK, INK2, MUTED, GRID = "#0b0b0b", "#52514e", "#8b8a84", "#e2e1dc"
 GOOD, CRITICAL = "#0ca30c", "#d03b3b"
-NYQUIST_GHZ = 2.133
+NYQUIST_DEFAULT_GHZ, NYQUIST_DEFAULT_LABEL = 2.133, " Nyquist 4266 MT/s"
+# build_report sets these per case from the board's `report` spec
+NYQUIST_GHZ, NYQUIST_LABEL = NYQUIST_DEFAULT_GHZ, NYQUIST_DEFAULT_LABEL
 
 
 def setup_style():
@@ -90,7 +92,7 @@ def z_from_gamma(gammas, z_ref):
 
 def _nyquist(ax):
   ax.axvline(NYQUIST_GHZ, color=MUTED, linewidth=0.8, linestyle=(0, (3, 3)))
-  ax.text(NYQUIST_GHZ, ax.get_ylim()[1], " Nyquist 4266 MT/s", color=INK2,
+  ax.text(NYQUIST_GHZ, ax.get_ylim()[1], NYQUIST_LABEL, color=INK2,
           fontsize=7, va="top", ha="left")
 
 

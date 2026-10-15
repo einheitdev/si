@@ -47,6 +47,11 @@ VENV = (pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir) / "opt" / "openEMS"
         / "venv" / "bin")
 PCBNEW_PATH = "/usr/local/lib/python3/dist-packages"
 REPORT_FREQS_MHZ = (500, 1000, 2133, 3000, 4266)
+# simulated band, table rows and Nyquist marker of a case; board.json
+# `report` overrides them per netclass (USB wants other rows than
+# LPDDR4X), an explicit --f-stop wins over both
+REPORT_DEFAULT = {"f_start": 2e8, "f_stop": 5e9,
+                  "rows_mhz": list(REPORT_FREQS_MHZ), "nyquist_mhz": 2133}
 # impedance calibration of this flow, taken from board.json (`z_cal`):
 # measured against a 2D field solve of the same cross-sections (zcalc.py),
 # openEMS with these ports and this mesh reads inner single-ended traces
@@ -89,6 +94,16 @@ def load_patterns(pro_path):
   return out
 
 
+def report_spec(board, netclass, f_stop=None):
+  """Band, table rows and Nyquist of a class: board.json `report` over
+  REPORT_DEFAULT; an explicit stop frequency wins over both."""
+  spec = dict(REPORT_DEFAULT)
+  spec.update(getattr(board, "report", {}).get(netclass) or {})
+  if f_stop:
+    spec["f_stop"] = f_stop
+  return spec
+
+
 def make_work_copy(board, work):
   """Copy the project into `work` with si-wrapper style netclass names."""
   work.mkdir(parents=True, exist_ok=True)
@@ -96,7 +111,7 @@ def make_work_copy(board, work):
     if src.exists():
       shutil.copy(src, work / src.name)
   pcb = work / board.pcb.name
-  healed, n = heal_micro_segments(pcb.read_text())
+  healed, n = heal_micro_segments(unlock(pcb.read_text()))
   pcb.write_text(healed)
   if n:
     print(f"work copy: merged away {n} track slivers under 0.06 mm")
@@ -120,6 +135,20 @@ def make_work_copy(board, work):
   for k, v in rename.items():
     dru = dru.replace(f"A.NetClass == '{k}'", f"A.NetClass == '{v}'")
   open(dru_path, "w").write(dru)
+
+
+LOCK_RE = re.compile(r"\n\t\t\(locked yes\)")
+
+
+def unlock(text):
+  """Drop the `(locked yes)` of every item in a board copy.
+
+  KiCad 10 writes it between `(width` and `(layer` of a segment (after
+  `(layers` of a via), which the track regexes here and in fix_ports do
+  not expect (seen: Backstop, whose USB pairs are all locked). The
+  scratch copy needs no locks.
+  """
+  return LOCK_RE.sub("", text)
 
 
 SEG_RE = re.compile(r'\n\t\(segment\s*\(start ([-\d.]+) ([-\d.]+)\)\s*'
@@ -202,6 +231,19 @@ def run(cmd, cwd, log=None):
   return res
 
 
+def fs_name(nets):
+  """si-wrapper's directory name of a case (its Settings.get_filesystem_name
+  rule): the sheet path and spaces of a hierarchical net name become
+  underscores, a pair's _P / + / _N / - suffix becomes _Diff."""
+  nn = nets[0].removeprefix("/")
+  for a, b in (("/", "_"), (" ", "_"), ("(", ""), (")", ""), ("{", ""),
+               ("}", ""), ("~", "neg")):
+    nn = nn.replace(a, b)
+  if len(nets) == 2:
+    nn = re.sub(r"((_P)|(_?\+)|(_N)|(_?\-))$", "_Diff", nn)
+  return nn
+
+
 def slice_case(work, nets, neighbour_offset, common_points, margin=3.0):
   """Cut `nets` (1 net or 1 pair) out of the work copy; returns slice dir."""
   cfg_dir = work / "net_configs"
@@ -217,13 +259,16 @@ def slice_case(work, nets, neighbour_offset, common_points, margin=3.0):
                             "common_points": common_points,
                             "in_use": True, "netlist": []},
   }
-  cfg_path = cfg_dir / f"{nets[0]}.json"
+  cfg_path = cfg_dir / f"{fs_name(nets[:1])}.json"
   json.dump(cfg, open(cfg_path, "w"), indent=2)
   # si-wrapper names the slice after the first net, or <pair>_Diff when it
   # recognises a _P/_N pair
-  candidates = [work / "slices" / nets[0]]
+  candidates = [work / "slices" / fs_name(nets), work / "slices" / nets[0]]
   if len(nets) == 2:
     candidates.append(work / "slices" / f"{pair_name(nets)}_Diff")
+  # a hierarchical name ("/sheet/NET") would make these absolute paths
+  candidates = [c for c in candidates if not c.is_absolute()
+                or str(c).startswith(str(work))]
   for c in candidates:
     if c.exists():
       shutil.rmtree(c)
@@ -252,11 +297,12 @@ def export_fab(board, slice_dir, name):
   shutil.copy(board.stackup_path, fab / "stackup.json")
 
 
-def configure(slice_dir, nets, ports, z_se, z_diff, f_stop, mesh_um):
+def configure(slice_dir, nets, ports, z_se, z_diff, f_stop, mesh_um,
+              f_start=2e8, max_frequency=4.266e9):
   """Write targets, interfaces and mesh into the slice's simulation.json."""
   path = slice_dir / "simulation.json"
   cfg = json.load(open(path))
-  cfg["frequency"] = {"start": 2e8, "stop": f_stop}
+  cfg["frequency"] = {"start": f_start, "stop": f_stop}
   cfg["grid"] = {"optimal": mesh_um, "diagonal": mesh_um,
                  "perpendicular": 4 * mesh_um, "max": 10 * mesh_um}
   # solid vias (patched gerber2ems): a hollow 50 um barrel wall is lost
@@ -264,11 +310,11 @@ def configure(slice_dir, nets, ports, z_se, z_diff, f_stop, mesh_um):
   cfg["via"] = {"plating_thickness": 50, "filling_epsilon": 0}
   for port, p in zip(cfg["ports"], ports):
     port["impedance"] = z_se
-    port["layer"] = fix_ports.LAYER_INDEX[p["layer"]]
-    port["plane"] = 1 if port["layer"] <= 3 else 6
+    port["layer"], port["plane"] = fix_ports.layer_plane(p["layer"])
     port["width"] = int(round(p["w"] * 1000))
     port["length"] = int(round(p["length"] * 1000))
-  interface = {"max_frequency": 4.266e9, "se_impedance_nominal": z_se,
+  interface = {"max_frequency": max_frequency,
+               "se_impedance_nominal": z_se,
                "se_impedance_tolerance": TOLERANCE}
   if z_diff:
     interface.update(diff_impedance_nominal=z_diff,
@@ -335,11 +381,11 @@ def mixed_mode(s_params, p_near, n_near, p_far, n_far):
   return sdd11, sdd21
 
 
-def se_metrics(freqs, s_params, k, far, z_ref):
+def se_metrics(freqs, s_params, k, far, z_ref, rows_mhz=REPORT_FREQS_MHZ):
   """Per-frequency table for one excited single-ended port."""
   rows = []
   others = sorted({i for (i, kk) in s_params if kk == k and i not in (k, far)})
-  for f in REPORT_FREQS_MHZ:
+  for f in rows_mhz:
     s11 = at(freqs, s_params[(k, k)], f)
     row = {"f_mhz": f, "z": abs(gamma_to_z(s11, z_ref)) * Z_CAL["se"],
            "rl_db": db(s11),
@@ -366,7 +412,7 @@ def mixed_mode_symmetric(s_params, k_near, k_far, o_near, o_far):
 
 
 def pair_metrics(freqs, s_params, p_near, n_near, p_far, n_far, z_diff,
-                 use_only=None):
+                 use_only=None, rows_mhz=REPORT_FREQS_MHZ):
   """Per-frequency differential table for a pair.
 
   `use_only` names the one excitation (p_near or n_near) to trust when the
@@ -381,7 +427,7 @@ def pair_metrics(freqs, s_params, p_near, n_near, p_far, n_far, z_diff,
     sdd11, sdd21 = mixed_mode_symmetric(s_params, n_near, n_far, p_near,
                                         p_far)
   rows = []
-  for f in REPORT_FREQS_MHZ:
+  for f in rows_mhz:
     g = at(freqs, sdd11, f)
     zdiff = abs(gamma_to_z(g, z_diff)) * Z_CAL["diff"]
     rows.append({"f_mhz": f, "zdiff": zdiff,
@@ -454,7 +500,8 @@ def git_rev(cwd):
 
 def run_config(args):
   """The settings a record carries so a report can state them."""
-  return {"f_stop": args.f_stop, "mesh": args.mesh,
+  return {"f_stop": args.f_stop or REPORT_DEFAULT["f_stop"],
+          "mesh": args.mesh,
           "neighbour_offset": args.neighbour_offset,
           "common_points": args.common_points, "margin": args.margin,
           "stitch": not args.no_stitch, "return_via": args.return_via,
@@ -478,11 +525,13 @@ def keep_raw(board, slice_dir, prefix):
   return raw
 
 
-def geometry_text(ports, nets):
+def geometry_text(ports, nets, spec=None):
   """Short description of where the slice's ports ended up."""
   layers = sorted({p["layer"] for p in ports})
+  band = (f"; {spec['f_start'] / 1e9:g}–{spec['f_stop'] / 1e9:g} GHz"
+          if spec else "")
   return (f"{len(nets)} net(s), ports on {', '.join(layers)}, trace width "
-          f"{ports[0]['w']:.3f} mm")
+          f"{ports[0]['w']:.3f} mm{band}")
 
 
 def run_case(board, nets, args, work, patterns):
@@ -491,6 +540,7 @@ def run_case(board, nets, args, work, patterns):
   if cls not in board.netclass_z:
     raise SystemExit(f"{nets[0]}: netclass {cls} has no impedance target")
   z_se, z_diff = board.netclass_z[cls]
+  spec = report_spec(board, cls, args.f_stop)
   is_pair = len(nets) == 2
   if is_pair and not z_diff:
     raise SystemExit(f"{nets}: class {cls} is not a differential class")
@@ -501,21 +551,23 @@ def run_case(board, nets, args, work, patterns):
                      work / board.pcb.name, nets)
   ports = fix_ports.fix_slice(str(slice_dir / f"{name}.kicad_pcb"), nets)
   export_fab(board, slice_dir, name)
-  configure(slice_dir, nets, ports, z_se, z_diff, args.f_stop, args.mesh)
+  configure(slice_dir, nets, ports, z_se, z_diff, spec["f_stop"], args.mesh,
+            f_start=spec["f_start"],
+            max_frequency=2e6 * spec["nyquist_mhz"])
   far = solve(slice_dir, is_pair)
   freqs, s_params = read_sparams(slice_dir)
   energy = energy_check(s_params, (0, 2) if is_pair else (0,))
   entry = {"nets": nets, "netclass": cls, "pair": is_pair,
            "energy": energy,
            "neighbours": sorted({n for (i, _) in s_params for n in []}),
-           "geometry": geometry_text(ports, nets),
+           "geometry": geometry_text(ports, nets, spec), "report": spec,
            "raw": str(keep_raw(board, slice_dir, name).relative_to(
                board.results))}
   if is_pair:
     good = [k for k in (0, 2) if energy[k] <= ENERGY_LIMIT]
     use_only = good[0] if len(good) == 1 else None
     rows = pair_metrics(freqs, s_params, 0, 2, far[0], far[2], z_diff,
-                        use_only)
+                        use_only, rows_mhz=spec["rows_mhz"])
     zs = [r["zdiff"] for r in rows]
     sym = ("" if use_only is None else
            f" [one port failed the energy check, pair taken as symmetric "
@@ -525,12 +577,14 @@ def run_case(board, nets, args, work, patterns):
                  verdict=verdict(zs, z_diff),
                  note=f"Z_diff {min(zs):.1f}–{max(zs):.1f} Ω against "
                       f"{z_diff} ±{z_diff * TOLERANCE:.0f}; leg coupling at "
-                      f"4266 MHz {rows[-1]['leg_xt_near_db']:.0f} dB NEXT "
+                      f"{spec['rows_mhz'][-1]} MHz "
+                      f"{rows[-1]['leg_xt_near_db']:.0f} dB NEXT "
                       "(about -20 dB at a 0.10 mm gap, -25 to -35 dB at "
                       "the 0.217 mm netclass gap)." + sym)
   else:
     far = detect_legs(s_params, (0,))[0]
-    rows, others = se_metrics(freqs, s_params, 0, far, z_se)
+    rows, others = se_metrics(freqs, s_params, 0, far, z_se,
+                              rows_mhz=spec["rows_mhz"])
     zs = [r["z"] for r in rows]
     xt_worst = max([r[f"xt{i}_db"] for r in rows for i in others] or [-99])
     v = verdict(zs, z_se)
@@ -540,7 +594,7 @@ def run_case(board, nets, args, work, patterns):
                  target=f"{z_se} Ω single-ended", verdict=v,
                  note=f"Z {min(zs):.1f}–{max(zs):.1f} Ω against {z_se} "
                       f"±{z_se * TOLERANCE:.0f}; IL {rows[-1]['il_db']:.1f} dB "
-                      f"at 4266 MHz; worst crosstalk "
+                      f"at {spec['rows_mhz'][-1]} MHz; worst crosstalk "
                       f"{xt_worst:.0f} dB" + (" (no neighbour in slice)"
                                               if not others else "") + ".")
   bad = [k for k, e in energy.items() if e > ENERGY_LIMIT]
@@ -569,7 +623,9 @@ def parse_args(argv):
                   help="scratch directory (default <board>/work)")
   ap.add_argument("--mesh", type=float, default=50,
                   help="cell size on traces, µm")
-  ap.add_argument("--f-stop", type=float, default=5e9)
+  ap.add_argument("--f-stop", type=float, default=None,
+                  help="stop frequency, Hz (default: the class's band from "
+                       "board.json `report`, else 5 GHz)")
   ap.add_argument("--neighbour-offset", type=float, default=0.3,
                   help="include other nets closer than this, mm")
   ap.add_argument("--common-points", type=int, default=10)
@@ -600,6 +656,8 @@ def main(argv=None):
   if args.z_cal:
     Z_CAL["se"], Z_CAL["diff"] = (float(x) for x in args.z_cal.split(","))
   fix_ports.STITCH = not args.no_stitch
+  fix_ports.COPPER_LAYERS = board.copper_layers()
+  fix_ports.PORT_PLANE = dict(board.port_plane)
   fix_ports.RETURN_VIA = args.return_via
   fix_ports.ZONE_CLEARANCE = args.zone_clearance
   if not args.se and not args.pair:

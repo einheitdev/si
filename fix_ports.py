@@ -38,6 +38,22 @@ import sys
 
 LAYER_INDEX = {"F.Cu": 0, "In1.Cu": 1, "In2.Cu": 2, "In3.Cu": 3, "In4.Cu": 4,
                "In5.Cu": 5, "In6.Cu": 6, "B.Cu": 7}
+# copper layers of the board top to bottom (gerber2ems metal index order)
+# and the plane a port on a layer is referenced to; run_si sets both from
+# board.json so a 4-layer board gets B.Cu = 3 and its own plane instead of
+# the 8-layer rule (L2 for L1-L4, L7 for L5-L8)
+COPPER_LAYERS = list(LAYER_INDEX)
+PORT_PLANE = {}
+
+
+def layer_plane(layer):
+  """(metal index of `layer`, metal index of the plane its port uses)."""
+  idx = COPPER_LAYERS.index(layer)
+  if layer in PORT_PLANE:
+    return idx, COPPER_LAYERS.index(PORT_PLANE[layer])
+  return idx, (1 if idx <= 3 else 6)
+
+
 # a port needs a straight uniform run under it: shorter straight pieces at a
 # trace end are cut off and the port moves inward (mm)
 MIN_PORT_SEG = 0.8
@@ -594,6 +610,35 @@ def refill_zones(pcb):
   report.unlink(missing_ok=True)
 
 
+def drop_surplus_ports(s, fps, order, ports):
+  """Keep one Simulation_Port footprint per trace-end port, the one
+  nearest to the end, numbered SP1..SPn in `order`, and cut the port
+  list to n. Returns (board text, ports).
+
+  si-wrapper puts a port on every pad of a designated net, so a net
+  with more pads than trace ends (a second connector pad hanging on a
+  stub, seen: UP_D on Backstop with J1's A and B row pads) brings
+  surplus footprints and ports.
+  """
+  anchors = [p["stub"][0] if "stub" in p else p["pos"] for p in order]
+  keep = {}
+  for i, (ax, ay) in enumerate(anchors):
+    free = [m for m in fps if m.start() not in keep]
+    best = min(free, key=lambda m: math.hypot(float(m.group(1)) - ax,
+                                              float(m.group(2)) - ay))
+    keep[best.start()] = i + 1
+  for m in sorted(fps, key=lambda m: m.start(), reverse=True):
+    if m.start() in keep:
+      a, b = m.span(4)
+      s = s[:a] + str(keep[m.start()]) + s[b:]
+    else:
+      start = s.rfind("\n\t(footprint", 0, m.end())
+      end = s.index("\n\t)", m.start()) + len("\n\t)")
+      s = s[:start] + s[end:]
+  ports = [dict(p, number=i + 1) for i, p in enumerate(ports[:len(order)])]
+  return s, ports
+
+
 def fix_slice(pcb, nets, refill=True):
   """Fix one slice in place; returns the ordered port list.
 
@@ -663,6 +708,9 @@ def fix_slice(pcb, nets, refill=True):
   sim_path = pathlib.Path(pcb).parent / "simulation.json"
   cfg = json.load(open(sim_path))
   fps = list(FOOTPRINT_RE.finditer(s))
+  if len(fps) > len(order) and len(fps) == len(cfg["ports"]):
+    s, cfg["ports"] = drop_surplus_ports(s, fps, order, cfg["ports"])
+    fps = list(FOOTPRINT_RE.finditer(s))
   if not len(fps) == len(order) == len(cfg["ports"]):
     raise ValueError(f"port count mismatch: {len(fps)} footprints, "
                      f"{len(order)} trace ends, {len(cfg['ports'])} ports")
@@ -698,8 +746,8 @@ def fix_slice(pcb, nets, refill=True):
                          "(seen: DDR_DQS1_B legs 0.02 mm apart in the "
                          "meander)")
   for pc, p in zip(cfg["ports"], order):
-    layer = LAYER_INDEX[p["layer"]]
-    pc.update(layer=layer, plane=1 if layer <= 3 else 6,
+    layer, plane = layer_plane(p["layer"])
+    pc.update(layer=layer, plane=plane,
               width=int(round(p["w"] * 1000)),
               length=int(round(p["length"] * 1000)))
   json.dump(cfg, open(sim_path, "w"), indent=2)

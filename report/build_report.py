@@ -110,6 +110,16 @@ def case_entry(case, results_dir, plot_dir, cfg):
   }
 
 
+def frequency_text(records, cfg):
+  """The simulated band(s): per netclass when the board sets `report`."""
+  bands = sorted({(r["report"]["f_start"], r["report"]["f_stop"])
+                  for r in records if r.get("report")})
+  if not bands:
+    return f"0.2 to {cfg['f_stop'] / 1e9:g} GHz, 1001 points"
+  return (", ".join(f"{a / 1e9:g} to {b / 1e9:g} GHz" for a, b in bands)
+          + " (per netclass, board.json `report`), 1001 points")
+
+
 def main(argv=None):
   """CLI."""
   ap = argparse.ArgumentParser(description=__doc__)
@@ -138,6 +148,11 @@ def main(argv=None):
     raise SystemExit("no records to report")
   cases, summary_rows, driver_entries = [], [], []
   for c in records:
+    spec = c.get("report")
+    siplots.NYQUIST_GHZ = (spec["nyquist_mhz"] / 1000 if spec
+                           else siplots.NYQUIST_DEFAULT_GHZ)
+    siplots.NYQUIST_LABEL = (f" Nyquist {spec['nyquist_mhz']} MHz" if spec
+                             else siplots.NYQUIST_DEFAULT_LABEL)
     e = case_entry(c, board.results, plot_dir, c["config"])
     cases.append(e)
     key = "zdiff" if c["pair"] else "z"
@@ -162,7 +177,7 @@ def main(argv=None):
       ["Solver", "openEMS FDTD via gerber2ems, slices via si-wrapper; "
                  "planes stitched with a GND via ring"],
       ["Stackup", board.stackup_path.name],
-      ["Frequency", f"0.2 to {cfg['f_stop'] / 1e9:g} GHz, 1001 points"],
+      ["Frequency", frequency_text(records, cfg)],
       ["Mesh", f"{cfg['mesh']:g} µm on traces, {4 * cfg['mesh']:g} µm "
                f"perpendicular, {10 * cfg['mesh']:g} µm max"],
       ["Slice", f"net plus neighbours within {cfg['neighbour_offset']} mm, "
