@@ -216,6 +216,19 @@ def run(cmd, cwd, log=None):
   return res
 
 
+def fs_name(nets):
+  """si-wrapper's directory name of a case (its Settings.get_filesystem_name
+  rule): the sheet path and spaces of a hierarchical net name become
+  underscores, a pair's _P / + / _N / - suffix becomes _Diff."""
+  nn = nets[0].removeprefix("/")
+  for a, b in (("/", "_"), (" ", "_"), ("(", ""), (")", ""), ("{", ""),
+               ("}", ""), ("~", "neg")):
+    nn = nn.replace(a, b)
+  if len(nets) == 2:
+    nn = re.sub(r"((_P)|(_?\+)|(_N)|(_?\-))$", "_Diff", nn)
+  return nn
+
+
 def slice_case(work, nets, neighbour_offset, common_points, margin=3.0):
   """Cut `nets` (1 net or 1 pair) out of the work copy; returns slice dir."""
   cfg_dir = work / "net_configs"
@@ -231,13 +244,16 @@ def slice_case(work, nets, neighbour_offset, common_points, margin=3.0):
                             "common_points": common_points,
                             "in_use": True, "netlist": []},
   }
-  cfg_path = cfg_dir / f"{nets[0]}.json"
+  cfg_path = cfg_dir / f"{fs_name(nets[:1])}.json"
   json.dump(cfg, open(cfg_path, "w"), indent=2)
   # si-wrapper names the slice after the first net, or <pair>_Diff when it
   # recognises a _P/_N pair
-  candidates = [work / "slices" / nets[0]]
+  candidates = [work / "slices" / fs_name(nets), work / "slices" / nets[0]]
   if len(nets) == 2:
     candidates.append(work / "slices" / f"{pair_name(nets)}_Diff")
+  # a hierarchical name ("/sheet/NET") would make these absolute paths
+  candidates = [c for c in candidates if not c.is_absolute()
+                or str(c).startswith(str(work))]
   for c in candidates:
     if c.exists():
       shutil.rmtree(c)
