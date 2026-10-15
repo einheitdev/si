@@ -159,5 +159,27 @@ class AtTest(unittest.TestCase):
     self.assertEqual(run_si.at([100, 200, 300], ["a", "b", "c"], 240), "b")
 
 
+class ReportSpecTest(unittest.TestCase):
+  """Band and table rows per netclass from board.json `report`."""
+
+  class Board:
+    report = {"USB2": {"f_start": 5e7, "f_stop": 3e9,
+                       "rows_mhz": [240, 500, 1000, 2000],
+                       "nyquist_mhz": 240}}
+
+  def test_default(self):
+    spec = run_si.report_spec(self.Board(), "DDR_DATA")
+    self.assertEqual(spec["rows_mhz"], list(run_si.REPORT_FREQS_MHZ))
+    self.assertEqual(spec["f_stop"], 5e9)
+    self.assertEqual(spec["nyquist_mhz"], 2133)
+
+  def test_class_override_and_cli(self):
+    spec = run_si.report_spec(self.Board(), "USB2")
+    self.assertEqual(spec["f_start"], 5e7)
+    self.assertEqual(spec["rows_mhz"], [240, 500, 1000, 2000])
+    self.assertEqual(run_si.report_spec(self.Board(), "USB2", 4e9)["f_stop"],
+                     4e9)
+
+
 if __name__ == "__main__":
   unittest.main()
