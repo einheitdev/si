@@ -96,7 +96,7 @@ def make_work_copy(board, work):
     if src.exists():
       shutil.copy(src, work / src.name)
   pcb = work / board.pcb.name
-  healed, n = heal_micro_segments(pcb.read_text())
+  healed, n = heal_micro_segments(unlock(pcb.read_text()))
   pcb.write_text(healed)
   if n:
     print(f"work copy: merged away {n} track slivers under 0.06 mm")
@@ -120,6 +120,20 @@ def make_work_copy(board, work):
   for k, v in rename.items():
     dru = dru.replace(f"A.NetClass == '{k}'", f"A.NetClass == '{v}'")
   open(dru_path, "w").write(dru)
+
+
+LOCK_RE = re.compile(r"\n\t\t\(locked yes\)")
+
+
+def unlock(text):
+  """Drop the `(locked yes)` of every item in a board copy.
+
+  KiCad 10 writes it between `(width` and `(layer` of a segment (after
+  `(layers` of a via), which the track regexes here and in fix_ports do
+  not expect (seen: Backstop, whose USB pairs are all locked). The
+  scratch copy needs no locks.
+  """
+  return LOCK_RE.sub("", text)
 
 
 SEG_RE = re.compile(r'\n\t\(segment\s*\(start ([-\d.]+) ([-\d.]+)\)\s*'
