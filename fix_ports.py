@@ -610,6 +610,35 @@ def refill_zones(pcb):
   report.unlink(missing_ok=True)
 
 
+def drop_surplus_ports(s, fps, order, ports):
+  """Keep one Simulation_Port footprint per trace-end port, the one
+  nearest to the end, numbered SP1..SPn in `order`, and cut the port
+  list to n. Returns (board text, ports).
+
+  si-wrapper puts a port on every pad of a designated net, so a net
+  with more pads than trace ends (a second connector pad hanging on a
+  stub, seen: UP_D on Backstop with J1's A and B row pads) brings
+  surplus footprints and ports.
+  """
+  anchors = [p["stub"][0] if "stub" in p else p["pos"] for p in order]
+  keep = {}
+  for i, (ax, ay) in enumerate(anchors):
+    free = [m for m in fps if m.start() not in keep]
+    best = min(free, key=lambda m: math.hypot(float(m.group(1)) - ax,
+                                              float(m.group(2)) - ay))
+    keep[best.start()] = i + 1
+  for m in sorted(fps, key=lambda m: m.start(), reverse=True):
+    if m.start() in keep:
+      a, b = m.span(4)
+      s = s[:a] + str(keep[m.start()]) + s[b:]
+    else:
+      start = s.rfind("\n\t(footprint", 0, m.end())
+      end = s.index("\n\t)", m.start()) + len("\n\t)")
+      s = s[:start] + s[end:]
+  ports = [dict(p, number=i + 1) for i, p in enumerate(ports[:len(order)])]
+  return s, ports
+
+
 def fix_slice(pcb, nets, refill=True):
   """Fix one slice in place; returns the ordered port list.
 
@@ -679,6 +708,9 @@ def fix_slice(pcb, nets, refill=True):
   sim_path = pathlib.Path(pcb).parent / "simulation.json"
   cfg = json.load(open(sim_path))
   fps = list(FOOTPRINT_RE.finditer(s))
+  if len(fps) > len(order) and len(fps) == len(cfg["ports"]):
+    s, cfg["ports"] = drop_surplus_ports(s, fps, order, cfg["ports"])
+    fps = list(FOOTPRINT_RE.finditer(s))
   if not len(fps) == len(order) == len(cfg["ports"]):
     raise ValueError(f"port count mismatch: {len(fps)} footprints, "
                      f"{len(order)} trace ends, {len(cfg['ports'])} ports")

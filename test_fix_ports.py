@@ -347,5 +347,29 @@ class FindPortsTest(unittest.TestCase):
     self.assertEqual(rots[(4, 6)], 90)
 
 
+class SurplusPortsTest(unittest.TestCase):
+  """A net with more pads than trace ends: the footprint nearest to each
+  end stays, renumbered in port order, the rest and their ports go."""
+
+  def test_drop(self):
+    def fp(n, x, y):
+      return (f'\n\t(footprint "Simulation_Port"\n\t\t(at {x} {y} 0)'
+              f'\n\t\t(property "Reference" "SP{n}"\n\t\t)\n\t)')
+    # the surplus one sits between the kept ones
+    s = "(kicad_pcb" + fp(1, 0, 0) + fp(2, 10, 5) + fp(3, 10, 0) + "\n)"
+    order = [dict(pos=(10.2, 0.1)), dict(pos=(0.1, 0))]
+    ports = [{"number": k} for k in (1, 2, 3)]
+    fps = list(fix_ports.FOOTPRINT_RE.finditer(s))
+    out, kept = fix_ports.drop_surplus_ports(s, fps, order, ports)
+    self.assertEqual(len(re.findall(r'"Reference" "SP(\d+)"', out)), 2)
+    self.assertEqual(out.count('(footprint "Simulation_Port"'), 2)
+    self.assertNotIn("(at 10 5 0)", out)
+    self.assertIn("(at 10 0 0)", out)
+    self.assertEqual([p["number"] for p in kept], [1, 2])
+    # the footprint at (10, 0) serves order[0] and becomes SP1
+    self.assertLess(out.index("(at 10 0 0)"), out.index('"SP1"'))
+    self.assertLess(out.index("(at 0 0 0)"), out.index('"SP2"'))
+
+
 if __name__ == "__main__":
   unittest.main()
